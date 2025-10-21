@@ -249,8 +249,11 @@ class YOLODataset:
         with open(metadata_path, "r") as f:
             return json.load(f)
 
-    def validate_dataset(self) -> Dict[str, Any]:
-        """Validate dataset integrity and return validation report.
+    def validate_dataset(self, check_duplicates: bool = False) -> Dict[str, Any]:
+        """Validate dataset integrity and return comprehensive validation report.
+
+        Args:
+            check_duplicates: Whether to check for duplicate images (slower).
 
         Returns:
             Dictionary containing validation results and statistics.
@@ -259,45 +262,213 @@ class YOLODataset:
             "valid": True,
             "errors": [],
             "warnings": [],
-            "stats": {},
+            "stats": {
+                "per_class": {},
+                "per_split": {},
+            },
         }
-        
+
         # Check directory structure
         if not self.images_dir.exists():
             report["errors"].append("Images directory missing")
             report["valid"] = False
-        
+            return report
+
         if not self.labels_dir.exists():
             report["errors"].append("Labels directory missing")
             report["valid"] = False
-        
-        if not self.classes_file.exists():
+            return report
+
+        # Load classes
+        classes = []
+        if self.classes_file.exists():
+            try:
+                classes = self.load_classes()
+                report["stats"]["num_classes"] = len(classes)
+            except Exception as e:
+                report["warnings"].append(f"Failed to load classes: {e}")
+        else:
             report["warnings"].append("Classes file missing")
-        
+
+        # Initialize per-class counters
+        class_counts = {i: {"train": 0, "val": 0} for i in range(len(classes))}
+
+        # Track hashes for duplicate detection
+        image_hashes = {} if check_duplicates else None
+
         # Count files per split
         splits = ["train", "val"]
+        total_images = 0
+        total_labels = 0
+        total_objects = 0
+
         for split in splits:
             images_split = self.images_dir / split
             labels_split = self.labels_dir / split
-            
-            if images_split.exists():
-                image_files = list(images_split.glob("*.jpg"))
-                report["stats"][f"{split}_images"] = len(image_files)
-                
-                # Check for missing labels
-                if labels_split.exists():
-                    label_files = list(labels_split.glob("*.txt"))
-                    report["stats"][f"{split}_labels"] = len(label_files)
-                    
-                    missing_labels = []
-                    for img_file in image_files:
-                        label_file = labels_split / f"{img_file.stem}.txt"
-                        if not label_file.exists():
-                            missing_labels.append(img_file.name)
-                    
-                    if missing_labels:
-                        report["warnings"].append(f"Missing labels for {len(missing_labels)} images in {split}")
-        
+
+            split_stats = {
+                "images": 0,
+                "labels": 0,
+                "objects": 0,
+                "missing_labels": [],
+                "malformed_labels": [],
+                "empty_labels": [],
+            }
+
+            if not images_split.exists():
+                report["warnings"].append(f"Split directory missing: {split}/images")
+                continue
+
+            if not labels_split.exists():
+                report["warnings"].append(f"Split directory missing: {split}/labels")
+                continue
+
+            image_files = list(images_split.glob("*.jpg")) + list(images_split.glob("*.png"))
+            split_stats["images"] = len(image_files)
+            total_images += len(image_files)
+
+            # Check each image and its label
+            for img_file in image_files:
+                label_file = labels_split / f"{img_file.stem}.txt"
+
+                if not label_file.exists():
+                    split_stats["missing_labels"].append(img_file.name)
+                    continue
+
+                split_stats["labels"] += 1
+                total_labels += 1
+
+                # Validate label file
+                try:
+                    with open(label_file, "r") as f:
+                        lines = [line.strip() for line in f if line.strip()]
+
+                    if len(lines) == 0:
+                        split_stats["empty_labels"].append(img_file.name)
+                        continue
+
+                    # Parse and validate each label
+                    for line_num, line in enumerate(lines, 1):
+                        parts = line.split()
+                        if len(parts) != 5:
+                            split_stats["malformed_labels"].append(
+                                f"{img_file.name}:{line_num} (expected 5 values, got {len(parts)})"
+                            )
+                            continue
+
+                        try:
+                            class_id = int(parts[0])
+                            coords = [float(x) for x in parts[1:]]
+
+                            # Validate class ID
+                            if class_id < 0 or (classes and class_id >= len(classes)):
+                                split_stats["malformed_labels"].append(
+                                    f"{img_file.name}:{line_num} (invalid class_id: {class_id})"
+                                )
+                                continue
+
+                            # Validate coordinates
+                            if not all(0 <= coord <= 1 for coord in coords):
+                                split_stats["malformed_labels"].append(
+                                    f"{img_file.name}:{line_num} (coordinates out of bounds)"
+                                )
+                                continue
+
+                            # Count objects per class
+                            if class_id in class_counts:
+                                class_counts[class_id][split] += 1
+                            split_stats["objects"] += 1
+                            total_objects += 1
+
+                        except (ValueError, IndexError) as e:
+                            split_stats["malformed_labels"].append(
+                                f"{img_file.name}:{line_num} (parse error: {e})"
+                            )
+
+                except Exception as e:
+                    split_stats["malformed_labels"].append(f"{img_file.name} (read error: {e})")
+
+                # Check for duplicates if requested
+                if check_duplicates and image_hashes is not None:
+                    try:
+                        img = cv2.imread(str(img_file))
+                        if img is not None:
+                            img_hash = self.get_image_hash(img)
+                            if img_hash in image_hashes:
+                                report["warnings"].append(
+                                    f"Duplicate image: {img_file.name} matches {image_hashes[img_hash]}"
+                                )
+                            else:
+                                image_hashes[img_hash] = img_file.name
+                    except Exception:
+                        pass  # Skip duplicate check on error
+
+            # Add split-level warnings
+            if split_stats["missing_labels"]:
+                report["warnings"].append(
+                    f"{split}: {len(split_stats['missing_labels'])} images without labels"
+                )
+            if split_stats["malformed_labels"]:
+                report["errors"].extend(
+                    [f"{split}: {msg}" for msg in split_stats["malformed_labels"][:10]]
+                )
+                if len(split_stats["malformed_labels"]) > 10:
+                    report["errors"].append(
+                        f"{split}: ... and {len(split_stats['malformed_labels']) - 10} more malformed labels"
+                    )
+                report["valid"] = False
+            if split_stats["empty_labels"]:
+                report["warnings"].append(
+                    f"{split}: {len(split_stats['empty_labels'])} empty label files"
+                )
+
+            report["stats"]["per_split"][split] = split_stats
+
+        # Overall statistics
+        report["stats"]["total_images"] = total_images
+        report["stats"]["total_labels"] = total_labels
+        report["stats"]["total_objects"] = total_objects
+
+        # Per-class statistics
+        for class_id, counts in class_counts.items():
+            class_name = classes[class_id] if class_id < len(classes) else f"class_{class_id}"
+            total_class = counts["train"] + counts["val"]
+            if total_class > 0:
+                report["stats"]["per_class"][class_name] = {
+                    "train": counts["train"],
+                    "val": counts["val"],
+                    "total": total_class,
+                }
+
+        # Check for class imbalance
+        if classes:
+            class_totals = [counts["train"] + counts["val"] for counts in class_counts.values()]
+            if class_totals:
+                max_count = max(class_totals)
+                min_count = min(class_totals)
+                if min_count == 0:
+                    missing_classes = [
+                        classes[i]
+                        for i, total in enumerate(class_totals)
+                        if total == 0 and i < len(classes)
+                    ]
+                    report["warnings"].append(f"Classes with no samples: {missing_classes}")
+                elif max_count > 10 * min_count:
+                    report["warnings"].append(
+                        f"Significant class imbalance detected (max: {max_count}, min: {min_count})"
+                    )
+
+        # Check split ratio
+        if total_images > 0:
+            train_ratio = report["stats"]["per_split"].get("train", {}).get("images", 0) / total_images
+            val_ratio = report["stats"]["per_split"].get("val", {}).get("images", 0) / total_images
+            report["stats"]["split_ratio"] = {"train": train_ratio, "val": val_ratio}
+
+            if val_ratio < 0.1:
+                report["warnings"].append("Validation set is very small (< 10% of data)")
+            elif val_ratio > 0.5:
+                report["warnings"].append("Validation set is very large (> 50% of data)")
+
         return report
 
     def get_image_hash(self, image: np.ndarray) -> str:

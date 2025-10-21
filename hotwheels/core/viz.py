@@ -262,3 +262,89 @@ def create_overlay(
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), color, -1)
     return cv2.addWeighted(frame, 1 - alpha, overlay, alpha, 0)
+
+
+def draw_quality_indicator(
+    frame: np.ndarray,
+    quality_info: Dict[str, Any],
+    position: Tuple[int, int] = (10, 90),
+    font_scale: float = 0.5,
+    thickness: int = 1,
+) -> np.ndarray:
+    """Draw image quality indicator on the frame.
+
+    Args:
+        frame: BGR image array.
+        quality_info: Quality assessment dictionary from assess_image_quality().
+        position: Starting position (x, y) for quality info.
+        font_scale: Font scale for text.
+        thickness: Text thickness.
+
+    Returns:
+        Frame with quality indicator drawn.
+    """
+    annotated = frame.copy()
+    x, y = position
+
+    # Determine color based on overall quality
+    quality_colors = {
+        "good": (0, 255, 0),      # Green
+        "fair": (0, 255, 255),    # Yellow
+        "poor": (0, 0, 255),      # Red
+    }
+    color = quality_colors.get(quality_info["overall_quality"], (255, 255, 255))
+
+    # Draw quality indicator
+    quality_text = f"Quality: {quality_info['overall_quality'].upper()}"
+    cv2.putText(
+        annotated,
+        quality_text,
+        (x, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        color,
+        thickness,
+    )
+
+    # Draw sharpness info
+    y += int(20 * font_scale)
+    sharpness_text = f"Sharpness: {quality_info['sharpness_score']:.0f} ({quality_info['sharpness_quality']})"
+    cv2.putText(
+        annotated,
+        sharpness_text,
+        (x, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale * 0.8,
+        (255, 255, 255),
+        thickness,
+    )
+
+    # Draw exposure info
+    y += int(20 * font_scale)
+    exposure_text = f"Exposure: {quality_info['mean_brightness']:.0f} ({quality_info['exposure_quality']})"
+    cv2.putText(
+        annotated,
+        exposure_text,
+        (x, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale * 0.8,
+        (255, 255, 255),
+        thickness,
+    )
+
+    # Draw warnings if any
+    if quality_info["warnings"]:
+        y += int(25 * font_scale)
+        for warning in quality_info["warnings"]:
+            cv2.putText(
+                annotated,
+                f"! {warning}",
+                (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale * 0.7,
+                (0, 165, 255),  # Orange
+                thickness,
+            )
+            y += int(18 * font_scale)
+
+    return annotated

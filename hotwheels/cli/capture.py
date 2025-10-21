@@ -14,8 +14,19 @@ import numpy as np
 
 from hotwheels.core.camera import make_video_capture
 from hotwheels.core.dataset import YOLODataset
-from hotwheels.core.utils import get_next_filename, normalize_coordinates, safe_filename
-from hotwheels.core.viz import draw_bounding_box, draw_instructions, draw_crosshair
+from hotwheels.core.utils import (
+    assess_image_quality,
+    format_validation_report,
+    get_next_filename,
+    normalize_coordinates,
+    safe_filename,
+)
+from hotwheels.core.viz import (
+    draw_bounding_box,
+    draw_crosshair,
+    draw_instructions,
+    draw_quality_indicator,
+)
 from hotwheels.core.yolo import get_device_string, load_model, load_names, predict
 
 
@@ -151,39 +162,44 @@ def mouse_callback(event: int, x: int, y: int, flags: int, param: Any) -> None:
 
 
 def draw_labeling_interface(
-    frame: np.ndarray, 
-    state: LabelingState, 
-    instructions: List[str]
+    frame: np.ndarray,
+    state: LabelingState,
+    instructions: List[str],
+    quality_info: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
     """Draw the labeling interface on the frame."""
     annotated = frame.copy()
-    
+
     # Draw existing boxes
     for i, (x1, y1, x2, y2, class_id) in enumerate(state.boxes):
         color = (0, 255, 0) if i == state.selected_box else (0, 140, 255)
         label = f"{state.classes[class_id]}"
         annotated = draw_bounding_box(annotated, x1, y1, x2, y2, label, color)
-    
+
     # Draw current box being drawn
     if state.current_box:
         x1, y1, x2, y2 = state.current_box
         annotated = draw_bounding_box(annotated, x1, y1, x2, y2, "", (255, 0, 0), 1)
-    
+
     # Draw crosshair
     if state.drawing and state.start_point:
         annotated = draw_crosshair(annotated, state.start_point[0], state.start_point[1])
-    
+
     # Draw instructions
     annotated = draw_instructions(annotated, instructions)
-    
+
     # Draw class info
     class_text = f"Class: {state.classes[state.current_class]} ({state.current_class})"
     cv2.putText(annotated, class_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
+
     # Draw box count
     count_text = f"Boxes: {len(state.boxes)}"
     cv2.putText(annotated, count_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    
+
+    # Draw quality indicator if provided
+    if quality_info is not None:
+        annotated = draw_quality_indicator(annotated, quality_info)
+
     return annotated
 
 
@@ -257,15 +273,52 @@ def parse_args() -> argparse.Namespace:
         choices=["auto", "cpu", "mps", "cuda"],
         help="Device for prelabeling inference.",
     )
+    parser.add_argument(
+        "--quality-check",
+        action="store_true",
+        help="Enable real-time image quality analysis and warnings.",
+    )
+    parser.add_argument(
+        "--quality-threshold",
+        type=str,
+        default="fair",
+        choices=["good", "fair", "poor"],
+        help="Minimum quality level to allow saving (good/fair/poor). Only applies with --quality-check.",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate dataset integrity and print report (does not start capture interface).",
+    )
+    parser.add_argument(
+        "--check-duplicates",
+        action="store_true",
+        help="Check for duplicate images during validation (slower). Only applies with --validate.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     """Main capture and labeling function."""
     args = parse_args()
-    
+
     # Initialize dataset
     dataset = YOLODataset(args.out_dir)
+
+    # Validation mode - validate and exit
+    if args.validate:
+        print(f"Validating dataset: {args.out_dir}")
+        print("This may take a while for large datasets...")
+        print()
+
+        report = dataset.validate_dataset(check_duplicates=args.check_duplicates)
+        formatted_report = format_validation_report(report)
+        print(formatted_report)
+
+        # Exit with appropriate code
+        sys.exit(0 if report["valid"] else 1)
+
+    # Normal capture mode
     dataset.create_structure()
     
     # Load or create classes
@@ -331,10 +384,13 @@ def main() -> None:
     
     frame_count = 0
     frozen_frame = None
-    
+    frozen_frame_quality = None
+
     try:
         print("Starting labeling interface. Press 'q' to quit...")
-        
+        if args.quality_check:
+            print(f"Quality checking enabled (minimum: {args.quality_threshold})")
+
         while True:
             # Read frame
             if frozen_frame is None:
@@ -344,7 +400,15 @@ def main() -> None:
                     continue
             else:
                 frame = frozen_frame.copy()
-            
+
+            # Assess quality if enabled
+            quality_info = None
+            if args.quality_check and frozen_frame is not None:
+                quality_info = frozen_frame_quality
+            elif args.quality_check and frozen_frame is None:
+                # Real-time quality assessment for live view
+                quality_info = assess_image_quality(frame)
+
             # Run prelabeling if enabled
             if prelabel_model and frozen_frame is None:
                 try:
@@ -376,8 +440,8 @@ def main() -> None:
                     print(f"Prelabeling error: {e}", file=sys.stderr)
             
             # Draw interface
-            annotated = draw_labeling_interface(frame, state, instructions)
-            
+            annotated = draw_labeling_interface(frame, state, instructions, quality_info)
+
             # Display frame
             cv2.imshow(args.window, annotated)
             
@@ -389,16 +453,39 @@ def main() -> None:
             elif key == ord(" "):  # SPACE - capture/freeze frame
                 frozen_frame = frame.copy()
                 state.clear()  # Clear any existing boxes
-                print("Frame captured. Draw bounding boxes and press ENTER to save.")
+
+                # Assess quality when capturing
+                if args.quality_check:
+                    frozen_frame_quality = assess_image_quality(frozen_frame)
+                    print(f"Frame captured. Quality: {frozen_frame_quality['overall_quality']} | Draw bounding boxes and press ENTER to save.")
+                    if frozen_frame_quality['warnings']:
+                        for warning in frozen_frame_quality['warnings']:
+                            print(f"  Warning: {warning}")
+                else:
+                    frozen_frame_quality = None
+                    print("Frame captured. Draw bounding boxes and press ENTER to save.")
             elif key == ord("\r") or key == ord("\n"):  # ENTER - save
                 if frozen_frame is not None and len(state.boxes) > 0:
+                    # Check quality threshold if enabled
+                    quality_threshold_map = {"good": 3, "fair": 2, "poor": 1}
+                    quality_level_map = {"good": 3, "fair": 2, "poor": 1}
+
+                    if args.quality_check and frozen_frame_quality:
+                        current_quality = quality_level_map.get(frozen_frame_quality["overall_quality"], 1)
+                        threshold = quality_threshold_map.get(args.quality_threshold, 2)
+
+                        if current_quality < threshold:
+                            print(f"Image quality ({frozen_frame_quality['overall_quality']}) is below threshold ({args.quality_threshold}). Not saved.")
+                            print(f"  Recommendation: {frozen_frame_quality['recommendation']}")
+                            continue
+
                     # Generate filename
                     filename = f"img_{frame_count:04d}"
                     frame_count += 1
-                    
+
                     # Save image
                     image_path = dataset.save_image(frozen_frame, filename, args.split)
-                    
+
                     # Convert boxes to YOLO format
                     img_height, img_width = frozen_frame.shape[:2]
                     yolo_labels = []
@@ -407,23 +494,27 @@ def main() -> None:
                             x1, y1, x2, y2, img_width, img_height
                         )
                         yolo_labels.append((class_id, x_center, y_center, width, height))
-                    
+
                     # Save labels
                     label_path = dataset.save_labels(yolo_labels, filename, args.split)
-                    
-                    # Save metadata
+
+                    # Save metadata (include quality info if available)
                     metadata = dataset.create_metadata(
                         frozen_frame, yolo_labels, args.split
                     )
+                    if frozen_frame_quality:
+                        metadata["quality"] = frozen_frame_quality
                     dataset.save_metadata(filename, args.split, metadata)
-                    
+
                     print(f"Saved: {image_path} + {label_path}")
                     frozen_frame = None
+                    frozen_frame_quality = None
                     state.clear()
                 else:
                     print("No frame captured or no boxes drawn")
             elif key == ord("n"):  # n - next frame without saving
                 frozen_frame = None
+                frozen_frame_quality = None
                 state.clear()
                 print("Skipped frame")
             elif key == ord("u"):  # u - undo

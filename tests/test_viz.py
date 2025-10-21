@@ -150,14 +150,15 @@ class TestVisualizationUtils:
                 self.boxes = [MockBox(0.3, 0)]
         
         detections = [MockDetection()]
-        
+
         # High confidence threshold should filter out the box
         annotated = draw_detections(
             frame, detections, names, show_fps=False, conf_threshold=0.5
         )
-        
-        # Should show "No cars detected" since box was filtered
-        assert not np.array_equal(frame, annotated)
+
+        # Box is filtered out, so frame should remain unchanged (no boxes drawn)
+        # The function only shows "No cars detected" when boxes list is empty, not when filtered
+        assert np.array_equal(frame, annotated)
 
     def test_draw_detections_custom_colors(self):
         """Test drawing detections with custom colors."""

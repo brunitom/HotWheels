@@ -9,7 +9,9 @@ A Python application for real-time HotWheels car detection and dataset creation 
 - **YOLO Dataset Management**: Automatic YOLO format generation with validation
 - **macOS Optimized**: AVFoundation camera backend with proper permission handling
 - **Prelabeling**: AI-assisted labeling using trained models
-- **Quality Controls**: Sharpness detection and exposure analysis
+- **Quality Controls**: Real-time sharpness detection and exposure analysis with quality thresholds
+- **Dataset Validation**: Comprehensive validation with per-class statistics and duplicate detection
+- **Metadata Tracking**: Automatic metadata generation with quality metrics
 
 ## Quick Start
 
@@ -76,8 +78,15 @@ hotwheels-capture --backend avfoundation --split train --out-dir dataset
 hotwheels-capture --backend avfoundation --split train --out-dir dataset \
   --prelabel --model runs/detect/train/weights/best.pt --device mps
 
-# Validation mode
-hotwheels-capture --validate dataset/
+# With quality checking (warns about blurry/dark images)
+hotwheels-capture --backend avfoundation --split train --out-dir dataset \
+  --quality-check --quality-threshold good
+
+# Validation mode (comprehensive dataset integrity check)
+hotwheels-capture --validate --out-dir dataset/
+
+# Validation with duplicate detection (slower)
+hotwheels-capture --validate --check-duplicates --out-dir dataset/
 ```
 
 ### Training a Model
@@ -172,7 +181,12 @@ Each label file contains normalized coordinates:
 | `--split` | Dataset split (train/val) | `train` |
 | `--classes` | Class names file | Auto-generated |
 | `--prelabel` | Enable AI-assisted labeling | `False` |
+| `--model` | Model path for prelabeling | None |
+| `--conf` | Confidence threshold for prelabeling | `0.5` |
+| `--quality-check` | Enable real-time quality analysis | `False` |
+| `--quality-threshold` | Min quality (good/fair/poor) | `fair` |
 | `--validate` | Validate dataset integrity | `False` |
+| `--check-duplicates` | Check for duplicate images | `False` |
 
 ### Keyboard Shortcuts (Capture Mode)
 

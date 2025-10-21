@@ -9,8 +9,9 @@ import os
 import random
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import cv2
 import numpy as np
 
 
@@ -335,3 +336,221 @@ def get_image_info(image_path: Union[str, Path]) -> Dict[str, Any]:
         "channels": channels,
         "modified": stat.st_mtime,
     }
+
+
+def calculate_sharpness(image: np.ndarray) -> Tuple[float, str]:
+    """Calculate image sharpness using Laplacian variance.
+
+    Higher values indicate sharper images. Typical ranges:
+    - < 100: Very blurry
+    - 100-200: Blurry
+    - 200-500: Acceptable
+    - > 500: Sharp
+
+    Args:
+        image: Input image (BGR or grayscale).
+
+    Returns:
+        Tuple of (sharpness_score, quality_level).
+        quality_level is one of: 'very_blurry', 'blurry', 'acceptable', 'sharp'
+    """
+    # Convert to grayscale if needed
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    # Calculate Laplacian variance
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    variance = laplacian.var()
+
+    # Classify quality level
+    if variance < 100:
+        quality = "very_blurry"
+    elif variance < 200:
+        quality = "blurry"
+    elif variance < 500:
+        quality = "acceptable"
+    else:
+        quality = "sharp"
+
+    return float(variance), quality
+
+
+def analyze_exposure(image: np.ndarray) -> Tuple[float, float, str]:
+    """Analyze image exposure using histogram analysis.
+
+    Calculates mean brightness and histogram distribution to detect
+    underexposed or overexposed images.
+
+    Args:
+        image: Input image (BGR or grayscale).
+
+    Returns:
+        Tuple of (mean_brightness, histogram_std, quality_level).
+        mean_brightness: Average pixel intensity (0-255)
+        histogram_std: Standard deviation of histogram
+        quality_level: One of 'underexposed', 'dark', 'good', 'bright', 'overexposed'
+    """
+    # Convert to grayscale if needed
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    # Calculate mean brightness
+    mean_brightness = float(np.mean(gray))
+
+    # Calculate histogram
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+    hist = hist.flatten() / hist.sum()  # Normalize
+
+    # Calculate histogram standard deviation
+    hist_std = float(np.std(hist))
+
+    # Classify exposure quality
+    if mean_brightness < 50:
+        quality = "underexposed"
+    elif mean_brightness < 85:
+        quality = "dark"
+    elif mean_brightness < 170:
+        quality = "good"
+    elif mean_brightness < 200:
+        quality = "bright"
+    else:
+        quality = "overexposed"
+
+    return mean_brightness, hist_std, quality
+
+
+def assess_image_quality(image: np.ndarray) -> Dict[str, Any]:
+    """Comprehensive image quality assessment.
+
+    Combines sharpness and exposure analysis to provide overall quality rating.
+
+    Args:
+        image: Input image (BGR or grayscale).
+
+    Returns:
+        Dictionary with quality metrics and recommendations.
+    """
+    sharpness_score, sharpness_quality = calculate_sharpness(image)
+    mean_brightness, hist_std, exposure_quality = analyze_exposure(image)
+
+    # Determine overall quality
+    warnings = []
+
+    if sharpness_quality in ["very_blurry", "blurry"]:
+        warnings.append(f"Image is {sharpness_quality} (score: {sharpness_score:.1f})")
+
+    if exposure_quality in ["underexposed", "overexposed"]:
+        warnings.append(f"Image is {exposure_quality} (brightness: {mean_brightness:.1f})")
+
+    # Overall assessment
+    if len(warnings) == 0:
+        overall_quality = "good"
+        recommendation = "Image quality is acceptable for training"
+    elif len(warnings) == 1:
+        overall_quality = "fair"
+        recommendation = "Image quality is marginal - consider recapturing"
+    else:
+        overall_quality = "poor"
+        recommendation = "Image quality is poor - strongly recommend recapturing"
+
+    return {
+        "overall_quality": overall_quality,
+        "sharpness_score": sharpness_score,
+        "sharpness_quality": sharpness_quality,
+        "mean_brightness": mean_brightness,
+        "exposure_quality": exposure_quality,
+        "histogram_std": hist_std,
+        "warnings": warnings,
+        "recommendation": recommendation,
+    }
+
+
+def format_validation_report(report: Dict[str, Any]) -> str:
+    """Format validation report as human-readable string.
+
+    Args:
+        report: Validation report from YOLODataset.validate_dataset().
+
+    Returns:
+        Formatted string with validation results.
+    """
+    lines = []
+    lines.append("=" * 70)
+    lines.append("DATASET VALIDATION REPORT")
+    lines.append("=" * 70)
+    lines.append("")
+
+    # Overall status
+    status = "VALID" if report["valid"] else "INVALID"
+    status_color = "✓" if report["valid"] else "✗"
+    lines.append(f"Status: {status_color} {status}")
+    lines.append("")
+
+    # Statistics
+    stats = report.get("stats", {})
+    lines.append("SUMMARY STATISTICS")
+    lines.append("-" * 70)
+    lines.append(f"  Total Images:  {stats.get('total_images', 0)}")
+    lines.append(f"  Total Labels:  {stats.get('total_labels', 0)}")
+    lines.append(f"  Total Objects: {stats.get('total_objects', 0)}")
+    lines.append(f"  Classes:       {stats.get('num_classes', 0)}")
+    lines.append("")
+
+    # Split statistics
+    split_ratio = stats.get("split_ratio", {})
+    if split_ratio:
+        lines.append("SPLIT DISTRIBUTION")
+        lines.append("-" * 70)
+        lines.append(f"  Train: {split_ratio.get('train', 0):.1%}")
+        lines.append(f"  Val:   {split_ratio.get('val', 0):.1%}")
+        lines.append("")
+
+    # Per-split details
+    per_split = stats.get("per_split", {})
+    if per_split:
+        lines.append("PER-SPLIT DETAILS")
+        lines.append("-" * 70)
+        for split, split_stats in per_split.items():
+            lines.append(f"  {split.upper()}:")
+            lines.append(f"    Images:  {split_stats.get('images', 0)}")
+            lines.append(f"    Labels:  {split_stats.get('labels', 0)}")
+            lines.append(f"    Objects: {split_stats.get('objects', 0)}")
+        lines.append("")
+
+    # Per-class statistics
+    per_class = stats.get("per_class", {})
+    if per_class:
+        lines.append("PER-CLASS OBJECT COUNTS")
+        lines.append("-" * 70)
+        lines.append(f"  {'Class':<30} {'Train':>10} {'Val':>10} {'Total':>10}")
+        lines.append("  " + "-" * 66)
+        for class_name, counts in sorted(per_class.items()):
+            lines.append(
+                f"  {class_name:<30} {counts['train']:>10} {counts['val']:>10} {counts['total']:>10}"
+            )
+        lines.append("")
+
+    # Warnings
+    warnings = report.get("warnings", [])
+    if warnings:
+        lines.append("WARNINGS")
+        lines.append("-" * 70)
+        for warning in warnings:
+            lines.append(f"  ⚠ {warning}")
+        lines.append("")
+
+    # Errors
+    errors = report.get("errors", [])
+    if errors:
+        lines.append("ERRORS")
+        lines.append("-" * 70)
+        for error in errors:
+            lines.append(f"  ✗ {error}")
+        lines.append("")
+
+    lines.append("=" * 70)
+    return "\n".join(lines)
