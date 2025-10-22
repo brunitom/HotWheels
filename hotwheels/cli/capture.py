@@ -32,25 +32,21 @@ from hotwheels.core.yolo import get_device_string, load_model, load_names, predi
 
 class LabelingState:
     """State management for the labeling interface."""
-    
-    def __init__(self, classes: List[str]):
+
+    def __init__(self, classes: List[str], current_class: int):
         self.classes = classes
-        self.current_class = 0
-        self.boxes: List[Tuple[int, int, int, int, int]] = []  # (x1, y1, x2, y2, class_id)
+        self.current_class = current_class
+        self.box: Optional[Tuple[int, int, int, int]] = None  # Single box: (x1, y1, x2, y2)
         self.drawing = False
         self.start_point: Optional[Tuple[int, int]] = None
         self.current_box: Optional[Tuple[int, int, int, int]] = None
-        self.selected_box: Optional[int] = None
-        self.undo_stack: List[List[Tuple[int, int, int, int, int]]] = []
-        self.redo_stack: List[List[Tuple[int, int, int, int, int]]] = []
     
     def start_drawing(self, x: int, y: int) -> None:
         """Start drawing a new bounding box."""
         self.drawing = True
         self.start_point = (x, y)
         self.current_box = (x, y, x, y)
-        self.selected_box = None
-    
+
     def update_drawing(self, x: int, y: int) -> None:
         """Update current bounding box while drawing."""
         if self.drawing and self.start_point:
@@ -59,122 +55,67 @@ class LabelingState:
             x2 = max(self.start_point[0], x)
             y2 = max(self.start_point[1], y)
             self.current_box = (x1, y1, x2, y2)
-    
+
     def finish_drawing(self, x: int, y: int) -> None:
-        """Finish drawing and add bounding box."""
+        """Finish drawing and save bounding box."""
         if self.drawing and self.start_point:
             x1 = min(self.start_point[0], x)
             y1 = min(self.start_point[1], y)
             x2 = max(self.start_point[0], x)
             y2 = max(self.start_point[1], y)
-            
-            # Only add if box is large enough
+
+            # Only save if box is large enough
             if abs(x2 - x1) > 10 and abs(y2 - y1) > 10:
-                self.save_state()
-                self.boxes.append((x1, y1, x2, y2, self.current_class))
-                self.redo_stack.clear()  # Clear redo when new action is performed
-            
+                self.box = (x1, y1, x2, y2)
+
             self.drawing = False
             self.start_point = None
             self.current_box = None
-    
-    def select_box(self, x: int, y: int) -> Optional[int]:
-        """Select a box at the given coordinates."""
-        for i, (x1, y1, x2, y2, _) in enumerate(self.boxes):
-            if x1 <= x <= x2 and y1 <= y <= y2:
-                self.selected_box = i
-                return i
-        self.selected_box = None
-        return None
-    
-    def delete_selected_box(self) -> bool:
-        """Delete the currently selected box."""
-        if self.selected_box is not None:
-            self.save_state()
-            del self.boxes[self.selected_box]
-            self.selected_box = None
-            self.redo_stack.clear()
-            return True
-        return False
-    
-    def set_class(self, class_id: int) -> None:
-        """Set the current class for new boxes."""
-        if 0 <= class_id < len(self.classes):
-            self.current_class = class_id
-    
-    def undo(self) -> bool:
-        """Undo the last action."""
-        if self.undo_stack:
-            self.redo_stack.append(self.boxes.copy())
-            self.boxes = self.undo_stack.pop()
-            self.selected_box = None
-            return True
-        return False
-    
-    def redo(self) -> bool:
-        """Redo the last undone action."""
-        if self.redo_stack:
-            self.undo_stack.append(self.boxes.copy())
-            self.boxes = self.redo_stack.pop()
-            self.selected_box = None
-            return True
-        return False
-    
-    def save_state(self) -> None:
-        """Save current state for undo/redo."""
-        self.undo_stack.append(self.boxes.copy())
-        if len(self.undo_stack) > 50:  # Limit undo history
-            self.undo_stack.pop(0)
-    
+
     def clear(self) -> None:
-        """Clear all boxes and reset state."""
-        self.save_state()
-        self.boxes.clear()
-        self.selected_box = None
+        """Clear box and reset state."""
+        self.box = None
         self.drawing = False
         self.start_point = None
         self.current_box = None
 
+    def has_box(self) -> bool:
+        """Check if a box has been drawn."""
+        return self.box is not None
+
 
 def mouse_callback(event: int, x: int, y: int, flags: int, param: Any) -> None:
     """Mouse callback for labeling interface."""
-    state, frame = param
-    
+    state = param
+
     if event == cv2.EVENT_LBUTTONDOWN:
-        if flags & cv2.EVENT_FLAG_CTRLKEY:
-            # Ctrl+click to select box
-            state.select_box(x, y)
-        else:
-            # Start drawing new box
-            state.start_drawing(x, y)
-    
+        # Start drawing new box
+        state.start_drawing(x, y)
+
     elif event == cv2.EVENT_MOUSEMOVE:
         if state.drawing:
             state.update_drawing(x, y)
-    
+
     elif event == cv2.EVENT_LBUTTONUP:
         if state.drawing:
             state.finish_drawing(x, y)
-    
-    elif event == cv2.EVENT_RBUTTONDOWN:
-        # Right-click to delete selected box
-        state.delete_selected_box()
 
 
 def draw_labeling_interface(
     frame: np.ndarray,
     state: LabelingState,
     instructions: List[str],
+    is_frozen: bool = False,
     quality_info: Optional[Dict[str, Any]] = None,
 ) -> np.ndarray:
     """Draw the labeling interface on the frame."""
     annotated = frame.copy()
 
-    # Draw existing boxes
-    for i, (x1, y1, x2, y2, class_id) in enumerate(state.boxes):
-        color = (0, 255, 0) if i == state.selected_box else (0, 140, 255)
-        label = f"{state.classes[class_id]}"
-        annotated = draw_bounding_box(annotated, x1, y1, x2, y2, label, color)
+    # Draw saved box
+    if state.box:
+        x1, y1, x2, y2 = state.box
+        label = f"{state.classes[state.current_class]}"
+        annotated = draw_bounding_box(annotated, x1, y1, x2, y2, label, (0, 255, 0))
 
     # Draw current box being drawn
     if state.current_box:
@@ -189,12 +130,12 @@ def draw_labeling_interface(
     annotated = draw_instructions(annotated, instructions)
 
     # Draw class info
-    class_text = f"Class: {state.classes[state.current_class]} ({state.current_class})"
+    class_text = f"Class: {state.classes[state.current_class]}"
     cv2.putText(annotated, class_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-    # Draw box count
-    count_text = f"Boxes: {len(state.boxes)}"
-    cv2.putText(annotated, count_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    # Draw mode indicator
+    mode_text = "FROZEN - Draw box" if is_frozen else "PREVIEW - Press 'c' to capture"
+    cv2.putText(annotated, mode_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
     # Draw quality indicator if provided
     if quality_info is not None:
@@ -229,13 +170,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="dataset",
         help="Output root for labeled data. Images and labels saved under images/{split} and labels/{split}.",
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        choices=["train", "val"],
-        help="Dataset split to save labeled data to (train or val).",
     )
     parser.add_argument(
         "--classes",
@@ -320,7 +254,7 @@ def main() -> None:
 
     # Normal capture mode
     dataset.create_structure()
-    
+
     # Load or create classes
     if args.classes and Path(args.classes).exists():
         classes = dataset.load_classes()
@@ -329,7 +263,7 @@ def main() -> None:
         # Default HotWheels classes
         classes = [
             "Mustang_GT_Blue",
-            "Camaro_SS_Red", 
+            "Camaro_SS_Red",
             "Civic_TypeR_White",
             "Corvette_Stingray_Yellow",
             "Porsche_911_Black",
@@ -341,6 +275,48 @@ def main() -> None:
         ]
         dataset.save_classes(classes)
         print(f"Created default classes: {classes}")
+
+    # Ask user to select class for this session
+    print("\nAvailable classes:")
+    for i, cls in enumerate(classes):
+        print(f"  {i}: {cls}")
+
+    while True:
+        try:
+            class_input = input(f"\nWhich car class are you capturing? (0-{len(classes)-1}): ").strip()
+            selected_class = int(class_input)
+            if 0 <= selected_class < len(classes):
+                break
+            else:
+                print(f"Please enter a number between 0 and {len(classes)-1}")
+        except (ValueError, KeyboardInterrupt):
+            print("\nCapture cancelled")
+            sys.exit(0)
+
+    print(f"Selected: {classes[selected_class]}")
+
+    # Ask user to select split for this session
+    print("\nDataset splits:")
+    print("  0: train (training data)")
+    print("  1: val (validation data)")
+    print("  2: test (test data)")
+
+    split_map = {0: "train", 1: "val", 2: "test"}
+    while True:
+        try:
+            split_input = input("\nWhich split for this session? (0=train, 1=val, 2=test): ").strip()
+            split_choice = int(split_input)
+            if split_choice in split_map:
+                selected_split = split_map[split_choice]
+                break
+            else:
+                print("Please enter 0, 1, or 2")
+        except (ValueError, KeyboardInterrupt):
+            print("\nCapture cancelled")
+            sys.exit(0)
+
+    print(f"Selected split: {selected_split}")
+    print(f"\nCapturing {classes[selected_class]} for {selected_split} split")
     
     # Load prelabeling model if requested
     prelabel_model = None
@@ -349,7 +325,7 @@ def main() -> None:
         if not args.model:
             print("Error: --model is required when using --prelabel", file=sys.stderr)
             sys.exit(1)
-        
+
         try:
             prelabel_model = load_model(args.model)
             prelabel_names = load_names(None, prelabel_model)
@@ -357,7 +333,7 @@ def main() -> None:
         except Exception as e:
             print(f"Failed to load prelabeling model: {e}", file=sys.stderr)
             sys.exit(1)
-    
+
     # Open camera
     try:
         cap = make_video_capture(args.camera, args.backend)
@@ -365,29 +341,30 @@ def main() -> None:
     except RuntimeError as e:
         print(f"Camera error: {e}", file=sys.stderr)
         sys.exit(2)
-    
+
     # Create window and set mouse callback
     cv2.namedWindow(args.window, cv2.WINDOW_NORMAL)
-    
-    # Initialize labeling state
-    state = LabelingState(classes)
-    
+
+    # Initialize labeling state with selected class
+    state = LabelingState(classes, selected_class)
+
     # Instructions
     instructions = [
-        "Mouse: Draw boxes, Ctrl+click to select",
-        "Keys: 1-9,0=class, u=undo, r=redo, d=delete",
-        "SPACE=capture, ENTER=save, n=next, q=quit"
+        "PREVIEW: Press 'c' to capture frame",
+        "FROZEN: Draw box, 'r'=redo, ENTER=save, 'n'=skip",
+        "q=quit"
     ]
-    
+
     # Set mouse callback
-    cv2.setMouseCallback(args.window, mouse_callback, (state, None))
-    
+    cv2.setMouseCallback(args.window, mouse_callback, state)
+
     frame_count = 0
     frozen_frame = None
     frozen_frame_quality = None
 
     try:
-        print("Starting labeling interface. Press 'q' to quit...")
+        print("\nStarting capture interface...")
+        print(f"Press 'c' to capture a frame, then draw a box around the {classes[selected_class]}")
         if args.quality_check:
             print(f"Quality checking enabled (minimum: {args.quality_threshold})")
 
@@ -409,19 +386,19 @@ def main() -> None:
                 # Real-time quality assessment for live view
                 quality_info = assess_image_quality(frame)
 
-            # Run prelabeling if enabled
-            if prelabel_model and frozen_frame is None:
+            # Run prelabeling if enabled and frame is frozen
+            if prelabel_model and frozen_frame is not None and not state.has_box():
                 try:
                     device_arg = get_device_string(args.device)
                     results = predict(
                         model=prelabel_model,
-                        source=frame,
+                        source=frozen_frame,
                         conf=args.conf,
                         device=device_arg,
                         verbose=False,
                     )
-                    
-                    # Convert prelabeling results to boxes
+
+                    # Convert prelabeling results to box (take first matching detection)
                     if results and len(results) > 0:
                         result = results[0]
                         boxes = result.boxes if hasattr(result, "boxes") else None
@@ -429,43 +406,43 @@ def main() -> None:
                             for box in boxes:
                                 xyxy = box.xyxy[0].tolist()
                                 conf = float(box.conf[0]) if box.conf is not None else 0.0
-                                cls_id = int(box.cls[0]) if box.cls is not None else -1
-                                
+
                                 if conf >= args.conf:
                                     x1, y1, x2, y2 = map(int, xyxy)
-                                    # Map model class to our classes (simplified)
-                                    mapped_class = min(cls_id, len(classes) - 1)
-                                    state.boxes.append((x1, y1, x2, y2, mapped_class))
+                                    state.box = (x1, y1, x2, y2)
+                                    print(f"Prelabeling suggestion added (conf: {conf:.2f}). Adjust if needed or press ENTER to save.")
+                                    break  # Only take first detection
                 except Exception as e:
                     print(f"Prelabeling error: {e}", file=sys.stderr)
-            
+
             # Draw interface
-            annotated = draw_labeling_interface(frame, state, instructions, quality_info)
+            annotated = draw_labeling_interface(frame, state, instructions, frozen_frame is not None, quality_info)
 
             # Display frame
             cv2.imshow(args.window, annotated)
-            
+
             # Handle key presses
             key = cv2.waitKey(1) & 0xFF
-            
+
             if key == ord("q"):
                 break
-            elif key == ord(" "):  # SPACE - capture/freeze frame
-                frozen_frame = frame.copy()
-                state.clear()  # Clear any existing boxes
+            elif key == ord("c"):  # c - capture/freeze frame
+                if frozen_frame is None:
+                    frozen_frame = frame.copy()
+                    state.clear()  # Clear any existing box
 
-                # Assess quality when capturing
-                if args.quality_check:
-                    frozen_frame_quality = assess_image_quality(frozen_frame)
-                    print(f"Frame captured. Quality: {frozen_frame_quality['overall_quality']} | Draw bounding boxes and press ENTER to save.")
-                    if frozen_frame_quality['warnings']:
-                        for warning in frozen_frame_quality['warnings']:
-                            print(f"  Warning: {warning}")
-                else:
-                    frozen_frame_quality = None
-                    print("Frame captured. Draw bounding boxes and press ENTER to save.")
+                    # Assess quality when capturing
+                    if args.quality_check:
+                        frozen_frame_quality = assess_image_quality(frozen_frame)
+                        print(f"Frame captured. Quality: {frozen_frame_quality['overall_quality']}")
+                        if frozen_frame_quality['warnings']:
+                            for warning in frozen_frame_quality['warnings']:
+                                print(f"  Warning: {warning}")
+                    else:
+                        frozen_frame_quality = None
+                        print("Frame captured. Draw bounding box and press ENTER to save.")
             elif key == ord("\r") or key == ord("\n"):  # ENTER - save
-                if frozen_frame is not None and len(state.boxes) > 0:
+                if frozen_frame is not None and state.has_box():
                     # Check quality threshold if enabled
                     quality_threshold_map = {"good": 3, "fair": 2, "poor": 1}
                     quality_level_map = {"good": 3, "fair": 2, "poor": 1}
@@ -484,68 +461,57 @@ def main() -> None:
                     frame_count += 1
 
                     # Save image
-                    image_path = dataset.save_image(frozen_frame, filename, args.split)
+                    image_path = dataset.save_image(frozen_frame, filename, selected_split)
 
-                    # Convert boxes to YOLO format
+                    # Convert box to YOLO format
                     img_height, img_width = frozen_frame.shape[:2]
-                    yolo_labels = []
-                    for x1, y1, x2, y2, class_id in state.boxes:
-                        x_center, y_center, width, height = normalize_coordinates(
-                            x1, y1, x2, y2, img_width, img_height
-                        )
-                        yolo_labels.append((class_id, x_center, y_center, width, height))
+                    x1, y1, x2, y2 = state.box
+                    x_center, y_center, width, height = normalize_coordinates(
+                        x1, y1, x2, y2, img_width, img_height
+                    )
+                    yolo_labels = [(selected_class, x_center, y_center, width, height)]
 
                     # Save labels
-                    label_path = dataset.save_labels(yolo_labels, filename, args.split)
+                    label_path = dataset.save_labels(yolo_labels, filename, selected_split)
 
                     # Save metadata (include quality info if available)
                     metadata = dataset.create_metadata(
-                        frozen_frame, yolo_labels, args.split
+                        frozen_frame, yolo_labels, selected_split
                     )
                     if frozen_frame_quality:
                         metadata["quality"] = frozen_frame_quality
-                    dataset.save_metadata(filename, args.split, metadata)
+                    dataset.save_metadata(filename, selected_split, metadata)
 
-                    print(f"Saved: {image_path} + {label_path}")
+                    print(f"Saved: {image_path} + {label_path} ({classes[selected_class]})")
                     frozen_frame = None
                     frozen_frame_quality = None
                     state.clear()
+                elif frozen_frame is not None and not state.has_box():
+                    print("No box drawn. Draw a box or press 'n' to skip.")
                 else:
-                    print("No frame captured or no boxes drawn")
-            elif key == ord("n"):  # n - next frame without saving
-                frozen_frame = None
-                frozen_frame_quality = None
-                state.clear()
-                print("Skipped frame")
-            elif key == ord("u"):  # u - undo
-                if state.undo():
-                    print("Undone")
-            elif key == ord("r"):  # r - redo
-                if state.redo():
-                    print("Redone")
-            elif key == ord("d"):  # d - delete selected box
-                if state.delete_selected_box():
-                    print("Deleted selected box")
-            elif ord("1") <= key <= ord("9"):  # 1-9 - select class
-                class_id = key - ord("1")
-                state.set_class(class_id)
-                print(f"Selected class: {classes[class_id]} ({class_id})")
-            elif key == ord("0"):  # 0 - select 10th class
-                if len(classes) > 9:
-                    state.set_class(9)
-                    print(f"Selected class: {classes[9]} (9)")
-    
+                    print("No frame captured. Press 'c' to capture a frame.")
+            elif key == ord("n"):  # n - skip current frame
+                if frozen_frame is not None:
+                    frozen_frame = None
+                    frozen_frame_quality = None
+                    state.clear()
+                    print("Skipped frame")
+            elif key == ord("r"):  # r - redo/clear box
+                if frozen_frame is not None:
+                    state.clear()
+                    print("Box cleared. Draw again.")
+
     except KeyboardInterrupt:
-        print("\nLabeling interrupted by user")
+        print("\nCapture interrupted by user")
     finally:
         # Clean up resources
         cap.release()
         cv2.destroyAllWindows()
-        
+
         # Save data.yaml
         dataset.save_data_yaml(classes)
         print(f"Saved data.yaml with {len(classes)} classes")
-        print("Labeling stopped")
+        print("Capture stopped")
 
 
 if __name__ == "__main__":
