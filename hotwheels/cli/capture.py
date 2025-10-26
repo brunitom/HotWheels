@@ -160,15 +160,15 @@ def draw_labeling_interface(
 
     # Draw class info
     class_text = f"Class: {state.classes[state.current_class]}"
-    cv2.putText(annotated, class_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(annotated, class_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     # Draw mode indicator
     mode_text = "FROZEN - Draw box" if is_frozen else "PREVIEW - Press 'c' to capture"
-    cv2.putText(annotated, mode_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(annotated, mode_text, (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-    # Draw quality indicator if provided
+    # Draw quality indicator if provided (position it below mode text)
     if quality_info is not None:
-        annotated = draw_quality_indicator(annotated, quality_info)
+        annotated = draw_quality_indicator(annotated, quality_info, position=(10, 85))
 
     return annotated
 

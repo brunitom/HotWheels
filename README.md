@@ -30,7 +30,7 @@ A Python application for real-time HotWheels car detection and dataset creation 
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/bruno.molinari12/HotWheels.git
+   git clone https://github.com/brunitom/HotWheels.git
    cd HotWheels
    ```
 

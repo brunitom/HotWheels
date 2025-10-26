@@ -124,7 +124,11 @@ dataset/
 
 **Label Format**: One line per object: `class_id x_center y_center width height` (all coordinates normalized to [0,1])
 
-**Important**: Class order in `classes.txt` is canonical and must remain consistent. Adding new classes appends to the end.
+**Important**:
+- Class order in `classes.txt` is canonical and must remain consistent
+- Adding new classes always appends to the end (preserves existing class IDs)
+- `classes.txt` is the source of truth - loaded on every capture session startup
+- Never reorder or delete classes (breaks existing label files)
 
 ## Camera Handling on macOS
 
@@ -142,8 +146,24 @@ Camera access requires explicit permissions:
 - Dataset I/O tests verify round-trip correctness (write → read → compare)
 - Validation tests use synthetic datasets to cover edge cases
 - Mock camera captures to avoid hardware dependency in unit tests
+- **Test Coverage**: 44 tests total covering capture CLI, similarity detection, class persistence, dataset I/O, visualization, and camera handling
 
 ## Important Implementation Notes
+
+### Dynamic Class Management
+The capture CLI supports adding new classes during the labeling workflow:
+- **Interactive Input**: Users can type a class number (0-9) OR a new class name at the prompt
+- **Duplicate Detection**: Uses `difflib.SequenceMatcher` with 70% similarity threshold to detect similar class names
+- **Validation**: Class names must be alphanumeric with underscores only (e.g., `Ford_Mustang_Red`)
+- **Persistence**: New classes are immediately saved to `classes.txt` and available in future sessions
+- **Case-Insensitive**: Duplicate checking is case-insensitive to prevent `Mustang_GT_Blue` vs `mustang_gt_blue`
+
+Implementation in `capture.py`:
+```python
+# Function: find_similar_classes(new_name, existing_classes, threshold=0.7)
+# Returns list of (class_name, similarity_score) tuples for matches above threshold
+# User gets confirmation prompt if similar classes are found
+```
 
 ### Device Selection
 The codebase supports `auto`, `cpu`, `mps` (Apple Silicon), and `cuda`. Auto-detection happens in ultralytics, but explicit device selection is available for performance tuning.
@@ -207,10 +227,18 @@ Trained weights will be at `runs/detect/train/weights/best.pt`.
 
 This is a mature, working system. All 5 implementation phases are complete (see IMPLEMENTATION_PLAN.md). The codebase includes:
 - ✅ Real-time detection CLI
-- ✅ Data collection & manual labeling CLI
+- ✅ Data collection & manual labeling CLI with dynamic class management
+- ✅ Intelligent duplicate detection (similarity matching)
+- ✅ Persistent class storage across sessions
 - ✅ Prelabeling integration
 - ✅ Quality controls
 - ✅ Dataset validation
-- ✅ Comprehensive test suite (29 tests passing)
+- ✅ Comprehensive test suite (44 tests passing)
+
+Recent additions:
+- Dynamic class management with on-the-fly class addition
+- String similarity matching for duplicate prevention (70% threshold)
+- Fixed class persistence bug - now always loads from `classes.txt` first
+- Added 13 new tests for capture CLI functionality
 
 Optional future enhancements: review mode for editing existing labels, advanced split management, performance profiling.

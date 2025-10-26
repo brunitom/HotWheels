@@ -1,6 +1,6 @@
 {
-  "timestamp": "2025-10-26T10:55:44.264690",
-  "split": "train",
+  "timestamp": "2025-10-26T11:44:39.275211",
+  "split": "test",
   "image_shape": [
     1080,
     1920,
@@ -10,17 +10,17 @@
   "classes": [
     10
   ],
-  "image_hash": "99f815a5dd9696943b4517026e98f750",
+  "image_hash": "0bf6ab007b10b7be9a312ce45b74a15a",
   "device": null,
   "quality": {
     "overall_quality": "fair",
-    "sharpness_score": 65.88880157077172,
+    "sharpness_score": 28.439242379645627,
     "sharpness_quality": "very_blurry",
-    "mean_brightness": 142.5874956597222,
+    "mean_brightness": 107.24655333719136,
     "exposure_quality": "good",
-    "histogram_std": 0.004213678650557995,
+    "histogram_std": 0.003162774257361889,
     "warnings": [
-      "Image is very_blurry (score: 65.9)"
+      "Image is very_blurry (score: 28.4)"
     ],
     "recommendation": "Image quality is marginal - consider recapturing"
   }
