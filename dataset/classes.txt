@@ -1,0 +1,10 @@
+Mustang_GT_Blue
+Camaro_SS_Red
+Civic_TypeR_White
+Corvette_Stingray_Yellow
+Porsche_911_Black
+BMW_M3_Silver
+Audi_R8_Orange
+Lamborghini_Huracan_Green
+Ferrari_488_Red
+McLaren_720S_Blue

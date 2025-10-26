@@ -283,13 +283,34 @@ def main() -> None:
 
     while True:
         try:
-            class_input = input(f"\nWhich car class are you capturing? (0-{len(classes)-1}): ").strip()
-            selected_class = int(class_input)
-            if 0 <= selected_class < len(classes):
+            class_input = input(f"\nWhich car class? (0-{len(classes)-1} or type new name): ").strip()
+
+            # Try to parse as integer first
+            try:
+                selected_class = int(class_input)
+                if 0 <= selected_class < len(classes):
+                    break
+                else:
+                    print(f"Please enter a number between 0 and {len(classes)-1}")
+            except ValueError:
+                # Not a number, treat as new class name
+                if not class_input:
+                    print("Please enter a class number or name")
+                    continue
+
+                # Validate class name (alphanumeric and underscores only)
+                if not all(c.isalnum() or c == '_' for c in class_input):
+                    print("Class name must contain only letters, numbers, and underscores")
+                    continue
+
+                # Add new class
+                classes.append(class_input)
+                selected_class = len(classes) - 1
+                dataset.save_classes(classes)
+                print(f"✅ Added new class: {class_input} (class_id: {selected_class})")
                 break
-            else:
-                print(f"Please enter a number between 0 and {len(classes)-1}")
-        except (ValueError, KeyboardInterrupt):
+
+        except KeyboardInterrupt:
             print("\nCapture cancelled")
             sys.exit(0)
 
