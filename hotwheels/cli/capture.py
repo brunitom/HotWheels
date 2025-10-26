@@ -5,6 +5,7 @@ labeling HotWheels cars with mouse-driven bounding box creation and editing.
 """
 
 import argparse
+import difflib
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -82,6 +83,34 @@ class LabelingState:
     def has_box(self) -> bool:
         """Check if a box has been drawn."""
         return self.box is not None
+
+
+def find_similar_classes(new_name: str, existing_classes: List[str], threshold: float = 0.7) -> List[Tuple[str, float]]:
+    """Find similar class names using string similarity.
+
+    Args:
+        new_name: New class name to check.
+        existing_classes: List of existing class names.
+        threshold: Similarity threshold (0.0-1.0).
+
+    Returns:
+        List of (class_name, similarity_score) tuples for matches above threshold.
+    """
+    similar = []
+    new_lower = new_name.lower()
+
+    for existing in existing_classes:
+        existing_lower = existing.lower()
+
+        # Calculate similarity ratio
+        ratio = difflib.SequenceMatcher(None, new_lower, existing_lower).ratio()
+
+        if ratio >= threshold:
+            similar.append((existing, ratio))
+
+    # Sort by similarity (highest first)
+    similar.sort(key=lambda x: x[1], reverse=True)
+    return similar
 
 
 def mouse_callback(event: int, x: int, y: int, flags: int, param: Any) -> None:
@@ -302,6 +331,23 @@ def main() -> None:
                 if not all(c.isalnum() or c == '_' for c in class_input):
                     print("Class name must contain only letters, numbers, and underscores")
                     continue
+
+                # Check for exact duplicate (case-insensitive)
+                if class_input.lower() in [cls.lower() for cls in classes]:
+                    print(f"❌ Class '{class_input}' already exists (case-insensitive match)")
+                    continue
+
+                # Check for similar existing classes
+                similar = find_similar_classes(class_input, classes, threshold=0.7)
+                if similar:
+                    print(f"\n⚠️  Similar classes found:")
+                    for cls, score in similar:
+                        print(f"    {cls} (similarity: {score:.0%})")
+
+                    confirm = input(f"\nAdd '{class_input}' anyway? (y/n): ").strip().lower()
+                    if confirm != 'y':
+                        print("Cancelled. Please choose an existing class or enter a different name.")
+                        continue
 
                 # Add new class
                 classes.append(class_input)

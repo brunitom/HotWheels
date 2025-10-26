@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-10-26T10:47:02.092982",
+  "split": "train",
+  "image_shape": [
+    1080,
+    1920,
+    3
+  ],
+  "num_objects": 1,
+  "classes": [
+    10
+  ],
+  "image_hash": "caf925faef942fe7109c24f4a8d572ba",
+  "device": null,
+  "quality": {
+    "overall_quality": "fair",
+    "sharpness_score": 24.173155154464773,
+    "sharpness_quality": "very_blurry",
+    "mean_brightness": 88.74466194058643,
+    "exposure_quality": "good",
+    "histogram_std": 0.006065338850021362,
+    "warnings": [
+      "Image is very_blurry (score: 24.2)"
+    ],
+    "recommendation": "Image quality is marginal - consider recapturing"
+  }
+}

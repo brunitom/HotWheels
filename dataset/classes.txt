@@ -8,3 +8,4 @@ Audi_R8_Orange
 Lamborghini_Huracan_Green
 Ferrari_488_Red
 McLaren_720S_Blue
+Subaru_Impreza_WRX
