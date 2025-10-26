@@ -1,17 +1,22 @@
-# HotWheels Detection & Labeling System
+# 🏎️ HotWheels Detection & Labeling System
 
 A Python application for real-time HotWheels car detection and dataset creation using YOLOv8 and OpenCV, optimized for macOS.
 
-## Features
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-44%20passed-brightgreen.svg)](tests/)
 
-- **Real-time Detection**: Live camera feed with YOLOv8 inference and bounding box overlays
-- **Data Collection**: Camera-based image capture with manual labeling interface
-- **YOLO Dataset Management**: Automatic YOLO format generation with validation
-- **macOS Optimized**: AVFoundation camera backend with proper permission handling
-- **Prelabeling**: AI-assisted labeling using trained models
-- **Quality Controls**: Real-time sharpness detection and exposure analysis with quality thresholds
-- **Dataset Validation**: Comprehensive validation with per-class statistics and duplicate detection
-- **Metadata Tracking**: Automatic metadata generation with quality metrics
+## ✨ Features
+
+- **🎥 Real-time Detection**: Live camera feed with YOLOv8 inference and bounding box overlays
+- **📸 Smart Data Collection**: Interactive labeling with duplicate detection and class management
+- **🎯 Dynamic Class Management**: Add new car classes on-the-fly with intelligent duplicate detection
+- **🔄 Persistent Class Storage**: Classes automatically saved and available across sessions
+- **🤖 Prelabeling**: AI-assisted labeling using trained models to speed up annotation
+- **✅ Quality Controls**: Real-time sharpness detection and exposure analysis with quality thresholds
+- **📊 Dataset Validation**: Comprehensive validation with per-class statistics and duplicate detection
+- **🗃️ Metadata Tracking**: Automatic metadata generation with quality metrics
+- **🍎 macOS Optimized**: AVFoundation camera backend with proper permission handling
 
 ## Quick Start
 
@@ -70,22 +75,52 @@ hotwheels-detect --model best.pt --conf 0.7 --backend avfoundation
 
 ### Data Collection & Labeling
 
-```bash
-# Manual labeling mode
-hotwheels-capture --backend avfoundation --split train --out-dir dataset
+#### Getting Started with Capture
 
-# With prelabeling assistance
-hotwheels-capture --backend avfoundation --split train --out-dir dataset \
+```bash
+# Basic capture with quality checks
+hotwheels-capture --backend avfoundation --out-dir dataset --quality-check
+```
+
+**Interactive Workflow:**
+1. **Choose a class**: Type a number (0-9) to select existing class OR type a new class name
+   ```
+   Available classes:
+     0: Mustang_GT_Blue
+     1: Camaro_SS_Red
+     ...
+
+   Which car class? (0-9 or type new name): Tesla_Cybertruck_Silver
+   ✅ Added new class: Tesla_Cybertruck_Silver (class_id: 10)
+   ```
+
+2. **Smart duplicate detection**: System warns if class name is similar to existing ones
+   ```
+   ⚠️  Similar classes found:
+       Subaru_Impreza_WRX (similarity: 93%)
+
+   Add 'Subaru_Imprezza_WRX' anyway? (y/n):
+   ```
+
+3. **Select split**: Choose train/val/test for this session
+
+4. **Capture images**: Press 'c' to freeze, draw boxes, press ENTER to save
+
+#### Advanced Capture Options
+
+```bash
+# With prelabeling assistance (faster annotation)
+hotwheels-capture --backend avfoundation --out-dir dataset \
   --prelabel --model runs/detect/train/weights/best.pt --device mps
 
-# With quality checking (warns about blurry/dark images)
-hotwheels-capture --backend avfoundation --split train --out-dir dataset \
+# With strict quality thresholds
+hotwheels-capture --backend avfoundation --out-dir dataset \
   --quality-check --quality-threshold good
 
-# Validation mode (comprehensive dataset integrity check)
+# Validation mode (check dataset integrity)
 hotwheels-capture --validate --out-dir dataset/
 
-# Validation with duplicate detection (slower)
+# Validation with duplicate image detection
 hotwheels-capture --validate --check-duplicates --out-dir dataset/
 ```
 
@@ -112,27 +147,34 @@ hotwheels-capture --validate --check-duplicates --out-dir dataset/
    yolo detect train model=yolov8n.pt data=data.yaml imgsz=640 epochs=100 device=auto
    ```
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 HotWheels/
-├── cli/
-│   ├── detect.py      # Real-time detection CLI
-│   └── capture.py     # Data collection & labeling CLI
-├── core/
-│   ├── camera.py      # Camera handling, FPS estimation
-│   ├── yolo.py        # Model loading, inference, names
-│   ├── viz.py         # Drawing utilities, overlays
-│   ├── dataset.py     # YOLO I/O, validation, manifests
-│   └── utils.py       # Path helpers, atomic writes
+├── hotwheels/
+│   ├── cli/
+│   │   ├── detect.py      # Real-time detection CLI
+│   │   └── capture.py     # Data collection & labeling CLI (with duplicate detection)
+│   └── core/
+│       ├── camera.py      # Camera handling, FPS estimation
+│       ├── yolo.py        # Model loading, inference, names
+│       ├── viz.py         # Drawing utilities, overlays
+│       ├── dataset.py     # YOLO I/O, validation, class management
+│       └── utils.py       # Path helpers, atomic writes, quality assessment
 ├── tests/
-│   └── test_dataset.py
-├── hotwheels_detector.py  # Legacy single script
-├── IMPLEMENTATION_PLAN.md
+│   ├── test_capture.py    # New: Similarity detection & class persistence tests
+│   ├── test_dataset.py    # Dataset I/O and validation tests
+│   ├── test_viz.py        # Visualization tests
+│   └── test_camera.py     # Camera handling tests
+├── dataset/               # Your captured data (git-ignored)
+│   └── classes.txt        # Persistent class list
+├── pyproject.toml         # Project config & dependencies
+├── CLAUDE.md             # AI assistant instructions
+├── IMPLEMENTATION_PLAN.md # Development roadmap
 └── README.md
 ```
 
-## Dataset Format
+## 📁 Dataset Format
 
 The system generates YOLO-compatible datasets:
 
@@ -150,8 +192,8 @@ dataset/
 │   │   └── img_0002.txt
 │   └── val/
 │       └── img_1001.txt
-├── data.yaml
-└── classes.txt
+├── data.yaml        # YOLO training config
+└── classes.txt      # Canonical class list (persistent)
 ```
 
 Each label file contains normalized coordinates:
@@ -159,6 +201,29 @@ Each label file contains normalized coordinates:
 0 0.512 0.438 0.200 0.120
 1 0.300 0.600 0.150 0.100
 ```
+
+### Managing Classes
+
+**`classes.txt` is the source of truth** for your car collection. The file persists across sessions:
+
+```txt
+Mustang_GT_Blue
+Camaro_SS_Red
+Civic_TypeR_White
+Tesla_Cybertruck_Silver
+```
+
+**Adding Classes:**
+- **During capture**: Just type the new name when prompted
+- **Manual editing**: Add new lines to `classes.txt` (one class per line)
+
+**Class Naming Rules:**
+- ✅ Use underscores: `Ford_F150_Red`
+- ✅ Be descriptive: Include model AND color
+- ✅ Alphanumeric + underscores only
+- ❌ No spaces: `Ford F150` → `Ford_F150`
+- ❌ No special chars: `Car#1` → `Car_1`
+- ⚠️ **Never reorder or delete** existing classes (breaks label consistency)
 
 ## Command Reference
 
@@ -192,14 +257,15 @@ Each label file contains normalized coordinates:
 
 | Key | Action |
 |-----|--------|
-| `SPACE` | Capture/freeze frame |
-| `1-9,0` | Select class (0 = 10th) |
-| `u` | Undo last action |
-| `r` | Redo |
-| `ESC` | Cancel current annotations |
+| `c` | Capture/freeze frame |
+| `r` | Redo (when drawing box) |
 | `ENTER` | Save image + labels |
 | `n` | Next frame (skip save) |
 | `q` | Quit application |
+
+**Mouse Controls:**
+- Click and drag to draw bounding box around car
+- Release to finalize box
 
 ## Troubleshooting
 
@@ -217,15 +283,34 @@ Each label file contains normalized coordinates:
 - **Invalid labels**: Run `hotwheels-capture --validate dataset/`
 - **Missing files**: Check file permissions and disk space
 - **Class mismatch**: Ensure `classes.txt` is consistent
+- **Classes disappearing**: Fixed! Classes are now automatically loaded from `dataset/classes.txt` on startup
+- **Duplicate class names**: System will warn and ask for confirmation before adding similar names
 
-## Development
+## 🧪 Development
 
 ### Running Tests
 ```bash
+# Run all tests
 pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=hotwheels --cov-report=html
+
+# Skip camera tests (require hardware)
+pytest tests/ -v -m "not camera"
+
+# Run specific test file
+pytest tests/test_capture.py -v
 ```
 
-### Code Style
+**Test Coverage:** 44 tests covering:
+- ✅ Similarity detection for duplicate class prevention
+- ✅ Class persistence across sessions
+- ✅ Dataset I/O and validation
+- ✅ Visualization utilities
+- ✅ Camera handling
+
+### Code Quality
 ```bash
 # Format code
 black hotwheels/
@@ -233,6 +318,9 @@ isort hotwheels/
 
 # Type checking
 mypy hotwheels/
+
+# Run all checks together
+black hotwheels/ && isort hotwheels/ && mypy hotwheels/ && pytest tests/ -v
 ```
 
 ### Contributing

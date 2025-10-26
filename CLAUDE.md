@@ -59,7 +59,7 @@ black hotwheels/ && isort hotwheels/ && mypy hotwheels/ && pytest tests/ -v
 hotwheels-detect --model runs/detect/train/weights/best.pt --backend avfoundation
 
 # Data collection with manual labeling
-hotwheels-capture --backend avfoundation --split train --out-dir dataset
+hotwheels-capture --backend avfoundation --out-dir dataset --quality-check
 
 # With prelabeling assistance
 hotwheels-capture --backend avfoundation --prelabel --model best.pt --device mps
@@ -67,6 +67,8 @@ hotwheels-capture --backend avfoundation --prelabel --model best.pt --device mps
 # Dataset validation
 hotwheels-capture --validate --out-dir dataset/
 ```
+
+**Note**: The capture CLI now allows adding new car classes dynamically during capture. Simply type the new class name when prompted instead of selecting a number.
 
 ## Architecture
 
@@ -93,6 +95,7 @@ hotwheels/
 3. **YOLO Dataset Format**: All I/O uses normalized coordinates [0,1] with strict validation
 4. **Quality First**: Built-in sharpness detection and exposure analysis to maintain dataset quality
 5. **Atomic Operations**: File writes use temporary files + atomic rename to prevent data corruption
+6. **Class Persistence**: `classes.txt` is always loaded first on startup to preserve user-added classes across sessions
 
 ### Key Modules Explained
 

@@ -285,11 +285,16 @@ def main() -> None:
     dataset.create_structure()
 
     # Load or create classes
-    if args.classes and Path(args.classes).exists():
+    # First check if classes.txt exists in the dataset
+    if dataset.classes_file.exists():
+        classes = dataset.load_classes()
+        print(f"Loaded {len(classes)} classes from {dataset.classes_file}")
+    elif args.classes and Path(args.classes).exists():
+        # Load from custom classes file
         classes = dataset.load_classes()
         print(f"Loaded {len(classes)} classes from {args.classes}")
     else:
-        # Default HotWheels classes
+        # Create default HotWheels classes
         classes = [
             "Mustang_GT_Blue",
             "Camaro_SS_Red",
